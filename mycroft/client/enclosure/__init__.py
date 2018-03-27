@@ -21,6 +21,7 @@ from threading import Thread, Timer
 import serial
 
 import mycroft.dialog
+from mycroft import dialog
 from mycroft.api import has_been_paired
 from mycroft.client.enclosure.arduino import EnclosureArduino
 from mycroft.client.enclosure.display_manager import \

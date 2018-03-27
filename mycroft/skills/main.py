@@ -12,21 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+import gc
 import json
+import os
 import subprocess
 import sys
 import time
-import monotonic
 from threading import Timer, Thread, Event, Lock
-import gc
 
-import os
+import monotonic
 from os.path import exists, join
 
 import mycroft.dialog
 import mycroft.lock
-from mycroft import MYCROFT_ROOT_PATH
-from mycroft.api import is_paired
+from mycroft import MYCROFT_ROOT_PATH, dialog
+from mycroft.api import is_paired, BackendDown, InternetDown
 from mycroft.configuration import Configuration
 from mycroft.messagebus.client.ws import WebsocketClient
 from mycroft.messagebus.message import Message
@@ -131,14 +131,14 @@ def check_connection():
         if is_paired():
             # Skip the sync message when unpaired because the prompt to go to
             # home.mycrof.ai will be displayed by the pairing skill
-            enclosure.mouth_text(mycroft.dialog.get("message_synching.clock"))
+            enclosure.mouth_text(dialog.get("message_synching.clock"))
 
         # Force a sync of the local clock with the internet
         config = Configuration.get()
         platform = config['enclosure'].get("platform", "unknown")
         if platform in ['mycroft_mark_1', 'picroft']:
             ws.emit(Message("system.ntp.sync"))
-            time.sleep(15)   # TODO: Generate/listen for a message response...
+            time.sleep(15)  # TODO: Generate/listen for a message response...
 
         # Check if the time skewed significantly.  If so, reboot
         skew = abs((monotonic.monotonic() - start_ticks) -
@@ -148,11 +148,11 @@ def check_connection():
             # prevent weird things from occcurring due to the 'time warp'.
             #
             ws.emit(Message("speak", {'utterance':
-                    mycroft.dialog.get("time.changed.reboot")}))
+                    dialog.get("time.changed.reboot")}))
             wait_while_speaking()
 
             # provide visual indicators of the reboot
-            enclosure.mouth_text(mycroft.dialog.get("message_rebooting"))
+            enclosure.mouth_text(dialog.get("message_rebooting"))
             enclosure.eyes_color(70, 65, 69)  # soft gray
             enclosure.eyes_spin()
 
@@ -168,17 +168,22 @@ def check_connection():
 
         ws.emit(Message('mycroft.internet.connected'))
         # check for pairing, if not automatically start pairing
-        if not is_paired():
-            # begin the process
-            payload = {
-                'utterances': ["pair my device"],
-                'lang': "en-us"
-            }
-            ws.emit(Message("recognizer_loop:utterance", payload))
-        else:
-            from mycroft.api import DeviceApi
-            api = DeviceApi()
-            api.update_version()
+        try:
+            if not is_paired(ignore_errors=False):
+                payload = {
+                    'utterances': ["pair my device"],
+                    'lang': "en-us"
+                }
+                ws.emit(Message("recognizer_loop:utterance", payload))
+            else:
+                from mycroft.api import DeviceApi
+                api = DeviceApi()
+                api.update_version()
+        except BackendDown:
+            data = {'utterance': dialog.get("backend.down")}
+            ws.emit(Message("speak", data))
+            ws.emit(Message("backend.down"))
+
     else:
         thread = Timer(1, check_connection)
         thread.daemon = True
